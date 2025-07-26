@@ -1,4 +1,4 @@
-# .github/workflows/mongodb-replication.yml
+
 name: MongoDB Replication
 
 # Este workflow se activa cuando recibe un dispatch desde la API
