@@ -1,4 +1,4 @@
-
+# .github/workflows/mongodb-replication.yml
 name: MongoDB Replication
 
 # Este workflow se activa cuando recibe un dispatch desde la API
@@ -43,10 +43,13 @@ jobs:
           ENTORNO: ${{ secrets.ENTORNO }}
 
           # Configuraciones MongoDB opcionales
-          # MONGO_MAX_POOL_SIZE: ${{ secrets.MONGO_MAX_POOL_SIZE }}
-          # MONGO_MIN_POOL_SIZE: ${{ secrets.MONGO_MIN_POOL_SIZE }}
-          # MONGO_CONNECTION_TIMEOUT: ${{ secrets.MONGO_CONNECTION_TIMEOUT }}
-          # MONGO_SERVER_SELECTION_TIMEOUT: ${{ secrets.MONGO_SERVER_SELECTION_TIMEOUT }}
+          MONGO_MAX_POOL_SIZE: ${{ secrets.MONGO_MAX_POOL_SIZE }}
+          MONGO_MIN_POOL_SIZE: ${{ secrets.MONGO_MIN_POOL_SIZE }}
+          MONGO_CONNECTION_TIMEOUT: ${{ secrets.MONGO_CONNECTION_TIMEOUT }}
+          MONGO_SERVER_SELECTION_TIMEOUT: ${{ secrets.MONGO_SERVER_SELECTION_TIMEOUT }}
+          
+          # Configuración de concurrencia paralela
+          MONGO_MAX_CONCURRENT_REPLICATIONS: ${{ secrets.MONGO_MAX_CONCURRENT_REPLICATIONS || '5' }}
 
       - name: Notify completion
         if: always()
