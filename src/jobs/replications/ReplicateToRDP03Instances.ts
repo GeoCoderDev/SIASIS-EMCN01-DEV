@@ -3,6 +3,7 @@ import { MongoClient, MongoClientOptions } from "mongodb";
 import { RDP03 } from "../../interfaces/shared/RDP03Instancias";
 import { RDP03_INSTANCES_DATABASE_URL_MAP } from "../../constants/RDP03_INSTANCES_DISTRIBUTION";
 import { MongoOperation } from "../../interfaces/shared/EMCN01/EMCN01Payload";
+import { Entorno } from "../../interfaces/shared/Entornos";
 
 // Tipos para los resultados
 interface ReplicationResult {
@@ -349,7 +350,7 @@ async function replicateToMongoDBInstances(): Promise<void> {
   );
 
   // Mostrar detalles de la operación si estamos en modo debug
-  if (process.env.ENTORNO === "D") {
+  if (process.env.ENTORNO === Entorno.DESARROLLO) {
     console.log("📝 Detalles de la operación:");
     console.log(`   - Operación: ${mongoOperation.operation}`);
     console.log(`   - Colección: ${mongoOperation.collection}`);
