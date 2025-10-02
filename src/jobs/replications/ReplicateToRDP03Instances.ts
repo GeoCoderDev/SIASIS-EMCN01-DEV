@@ -16,9 +16,79 @@ interface ReplicationResult {
   duracion?: number;
 }
 
+// Función de sanitización - Convierte campos específicos a string
+function sanitizeMongoOperation(operation: MongoOperation): MongoOperation {
+  const fieldsToConvertToString = [
+    // IDs principales
+    // 'Id_Estudiante',
+    // 'Id_Responsable',
+    // 'Id_Profesor_Primaria',
+    // 'Id_Profesor_Secundaria',
+    // 'Id_Auxiliar',
+    // 'Id_Personal_Administrativo',
+    'Id_Aula',
+    // 'Id_Aula_Secundaria',
+    // 'Id_Curso_Horario',
+    
+    // Campos de relaciones
+    // '_id',
+    
+    // Otros campos que deben ser string
+    // 'Celular',
+    // 'Identificador_Nacional'
+  ];
+
+  // Función recursiva para convertir campos en objetos anidados
+  function convertFieldsToString(obj: any): any {
+    if (obj === null || obj === undefined) return obj;
+    
+    if (Array.isArray(obj)) {
+      return obj.map(item => convertFieldsToString(item));
+    }
+    
+    if (typeof obj === 'object') {
+      const converted: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (fieldsToConvertToString.includes(key) && value !== null && value !== undefined) {
+          // Convertir a string si es número o ya es string
+          converted[key] = String(value);
+        } else if (typeof value === 'object') {
+          // Recursión para objetos anidados
+          converted[key] = convertFieldsToString(value);
+        } else {
+          converted[key] = value;
+        }
+      }
+      return converted;
+    }
+    
+    return obj;
+  }
+
+  // Crear una copia del operation para no mutar el original
+  const sanitizedOperation: MongoOperation = { ...operation };
+
+  // Sanitizar filter
+  if (sanitizedOperation.filter) {
+    sanitizedOperation.filter = convertFieldsToString(sanitizedOperation.filter);
+  }
+
+  // Sanitizar data
+  if (sanitizedOperation.data) {
+    sanitizedOperation.data = convertFieldsToString(sanitizedOperation.data);
+  }
+
+  // Sanitizar pipeline (para aggregates)
+  if (sanitizedOperation.pipeline) {
+    sanitizedOperation.pipeline = convertFieldsToString(sanitizedOperation.pipeline);
+  }
+
+  return sanitizedOperation;
+}
+
 // Configuración MongoDB optimizada para replicación paralela
 const mongoOptions: MongoClientOptions = {
-  maxPoolSize: parseInt(process.env.MONGO_MAX_POOL_SIZE || "3", 10), // Reducido para paralelo
+  maxPoolSize: parseInt(process.env.MONGO_MAX_POOL_SIZE || "3", 10),
   minPoolSize: parseInt(process.env.MONGO_MIN_POOL_SIZE || "1", 10),
   maxIdleTimeMS: 30000,
   serverSelectionTimeoutMS: parseInt(
@@ -26,7 +96,7 @@ const mongoOptions: MongoClientOptions = {
     10
   ),
   connectTimeoutMS: parseInt(
-    process.env.MONGO_CONNECTION_TIMEOUT || "8000", // Reducido para fallar rápido
+    process.env.MONGO_CONNECTION_TIMEOUT || "8000",
     10
   ),
   heartbeatFrequencyMS: 10000,
@@ -49,10 +119,20 @@ let mongoOperation: MongoOperation;
 let instanciasAActualizar: RDP03[] = [];
 
 try {
-  mongoOperation = JSON.parse(mongoOperationJson);
+  // Parsear la operación
+  const rawOperation = JSON.parse(mongoOperationJson);
+  
+  // SANITIZAR: Convertir campos numéricos a string
+  mongoOperation = sanitizeMongoOperation(rawOperation);
 
   if (instanciasAActualizarJson) {
     instanciasAActualizar = JSON.parse(instanciasAActualizarJson) as RDP03[];
+  }
+  
+  // Log de verificación en desarrollo
+  if (process.env.ENTORNO === Entorno.DESARROLLO) {
+    console.log("Operación sanitizada:");
+    console.log(JSON.stringify(mongoOperation, null, 2));
   }
 } catch (error) {
   console.error("Error al parsear parámetros:", error);
@@ -161,7 +241,6 @@ async function executeMongoOperation(
           },
         };
 
-      // Operaciones de lectura (no deberían llegar aquí en replicación, pero por completitud)
       case "find":
         result = await collection
           .find(operation.filter || {}, operation.options)
@@ -249,12 +328,12 @@ function getAffectedDocumentsCount(operationType: string, result: any): number {
   }
 }
 
-// 🚀 NUEVA FUNCIÓN PARALELA - Replica en una sola instancia
+// NUEVA FUNCIÓN PARALELA - Replica en una sola instancia
 async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationResult> {
   const dbUrl = RDP03_INSTANCES_DATABASE_URL_MAP.get(instancia);
 
   if (!dbUrl) {
-    console.warn(`⚠️ URL no disponible para instancia ${instancia}`);
+    console.warn(`URL no disponible para instancia ${instancia}`);
     return {
       instancia,
       success: false,
@@ -264,7 +343,7 @@ async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationR
     };
   }
 
-  console.log(`🔄 Replicando en instancia ${instancia}...`);
+  console.log(`Replicando en instancia ${instancia}...`);
 
   const client = new MongoClient(dbUrl, mongoOptions);
 
@@ -291,7 +370,7 @@ async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationR
       );
 
       console.log(
-        `✅ Operación completada en ${instancia}: ${documentosAfectados} documentos afectados en ${duration}ms`
+        `Operación completada en ${instancia}: ${documentosAfectados} documentos afectados en ${duration}ms`
       );
 
       return {
@@ -304,7 +383,7 @@ async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationR
       };
     } else {
       console.error(
-        `❌ Error en instancia ${instancia}: ${operationResult.error}`
+        `Error en instancia ${instancia}: ${operationResult.error}`
       );
       return {
         instancia,
@@ -317,7 +396,7 @@ async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationR
     }
   } catch (error: any) {
     console.error(
-      `❌ Error de conexión en instancia ${instancia}:`,
+      `Error de conexión en instancia ${instancia}:`,
       error.message
     );
     return {
@@ -333,25 +412,25 @@ async function replicateToSingleInstance(instancia: RDP03): Promise<ReplicationR
       await client.close();
     } catch (closeError) {
       console.warn(
-        `⚠️ Error cerrando conexión para ${instancia}:`,
+        `Error cerrando conexión para ${instancia}:`,
         closeError
       );
     }
   }
 }
 
-// 🎯 FUNCIÓN PRINCIPAL CON EJECUCIÓN PARALELA OPTIMIZADA
+// FUNCIÓN PRINCIPAL CON EJECUCIÓN PARALELA OPTIMIZADA
 async function replicateToMongoDBInstances(): Promise<void> {
-  console.log("🚀 Iniciando replicación MongoDB EMCN01 - MODO PARALELO");
-  console.log(`📊 Timestamp de operación: ${timestamp}`);
-  console.log(`🎯 Instancias a actualizar: ${instanciasAActualizar.length}`);
+  console.log("Iniciando replicación MongoDB EMCN01 - MODO PARALELO");
+  console.log(`Timestamp de operación: ${timestamp}`);
+  console.log(`Instancias a actualizar: ${instanciasAActualizar.length}`);
   console.log(
-    `🔧 Operación a replicar: ${mongoOperation.operation} en colección ${mongoOperation.collection}`
+    `Operación a replicar: ${mongoOperation.operation} en colección ${mongoOperation.collection}`
   );
 
   // Mostrar detalles de la operación si estamos en modo debug
   if (process.env.ENTORNO === Entorno.DESARROLLO) {
-    console.log("📝 Detalles de la operación:");
+    console.log("Detalles de la operación:");
     console.log(`   - Operación: ${mongoOperation.operation}`);
     console.log(`   - Colección: ${mongoOperation.collection}`);
     if (mongoOperation.filter) {
@@ -371,17 +450,17 @@ async function replicateToMongoDBInstances(): Promise<void> {
 
   const startTime = Date.now();
 
-  // 🚀 EJECUCIÓN PARALELA CON CONTROL DE CONCURRENCIA
-  const maxConcurrentConnections = parseInt(process.env.MONGO_MAX_CONCURRENT_REPLICATIONS || "5", 10); // Cambiado default a 5
+  // EJECUCIÓN PARALELA CON CONTROL DE CONCURRENCIA
+  const maxConcurrentConnections = parseInt(process.env.MONGO_MAX_CONCURRENT_REPLICATIONS || "5", 10);
   
-  console.log(`⚡ Ejecutando hasta ${maxConcurrentConnections} replicaciones simultáneas`);
+  console.log(`Ejecutando hasta ${maxConcurrentConnections} replicaciones simultáneas`);
 
   let results: ReplicationResult[] = [];
 
   // Ejecutar todas las instancias en paralelo si no supera el límite
   if (instanciasAActualizar.length <= maxConcurrentConnections) {
-    // ⚡ MODO PARALELO COMPLETO - Todas las instancias a la vez
-    console.log("🔥 Ejecutando TODAS las replicaciones en paralelo completo");
+    // MODO PARALELO COMPLETO - Todas las instancias a la vez
+    console.log("Ejecutando TODAS las replicaciones en paralelo completo");
     
     const promesasReplicacion = instanciasAActualizar.map(instancia => 
       replicateToSingleInstance(instancia)
@@ -392,12 +471,12 @@ async function replicateToMongoDBInstances(): Promise<void> {
     
   } else {
     // Si hay más instancias que el límite, procesarlas en lotes
-    console.log(`📦 Procesando en lotes de ${maxConcurrentConnections} instancias (hay ${instanciasAActualizar.length} instancias)`);
+    console.log(`Procesando en lotes de ${maxConcurrentConnections} instancias (hay ${instanciasAActualizar.length} instancias)`);
     
     for (let i = 0; i < instanciasAActualizar.length; i += maxConcurrentConnections) {
       const lote = instanciasAActualizar.slice(i, i + maxConcurrentConnections);
       
-      console.log(`🔄 Procesando lote ${Math.floor(i / maxConcurrentConnections) + 1}/${Math.ceil(instanciasAActualizar.length / maxConcurrentConnections)}: [${lote.join(', ')}]`);
+      console.log(`Procesando lote ${Math.floor(i / maxConcurrentConnections) + 1}/${Math.ceil(instanciasAActualizar.length / maxConcurrentConnections)}: [${lote.join(', ')}]`);
       
       const promesasLote = lote.map(instancia => replicateToSingleInstance(instancia));
       const resultadosLote = await Promise.all(promesasLote);
@@ -408,11 +487,11 @@ async function replicateToMongoDBInstances(): Promise<void> {
 
   const totalDuration = Date.now() - startTime;
 
-  console.log("\n📊 Resumen de replicación MongoDB (PARALELA):");
+  console.log("\nResumen de replicación MongoDB (PARALELA):");
   console.table(
     results.map((r) => ({
       Instancia: r.instancia,
-      Estado: r.success ? "✅ Éxito" : "❌ Error",
+      Estado: r.success ? "Éxito" : "Error",
       Operación: r.operacion,
       Colección: r.coleccion,
       "Docs Afectados": r.documentosAfectados || 0,
@@ -425,10 +504,10 @@ async function replicateToMongoDBInstances(): Promise<void> {
   const exitosos = results.filter((r) => r.success);
   const fallidos = results.filter((r) => !r.success);
 
-  console.log(`\n📈 Estadísticas finales (PARALELO):`);
-  console.log(`   ✅ Exitosos: ${exitosos.length}/${results.length}`);
-  console.log(`   ❌ Fallidos: ${fallidos.length}/${results.length}`);
-  console.log(`   ⏱️ Tiempo total de replicación: ${totalDuration}ms`);
+  console.log(`\nEstadísticas finales (PARALELO):`);
+  console.log(`   Exitosos: ${exitosos.length}/${results.length}`);
+  console.log(`   Fallidos: ${fallidos.length}/${results.length}`);
+  console.log(`   Tiempo total de replicación: ${totalDuration}ms`);
 
   if (exitosos.length > 0) {
     const totalDocumentos = exitosos.reduce(
@@ -440,29 +519,29 @@ async function replicateToMongoDBInstances(): Promise<void> {
     const tiempoMasLento = Math.max(...exitosos.map(r => r.duracion || 0));
     const tiempoMasRapido = Math.min(...exitosos.map(r => r.duracion || 0));
     
-    console.log(`   📊 Total documentos afectados: ${totalDocumentos}`);
-    console.log(`   ⏱️ Tiempo promedio por instancia: ${Math.round(promedioTiempoInstancia)}ms`);
-    console.log(`   🐌 Instancia más lenta: ${tiempoMasLento}ms`);
-    console.log(`   🚀 Instancia más rápida: ${tiempoMasRapido}ms`);
+    console.log(`   Total documentos afectados: ${totalDocumentos}`);
+    console.log(`   Tiempo promedio por instancia: ${Math.round(promedioTiempoInstancia)}ms`);
+    console.log(`   Instancia más lenta: ${tiempoMasLento}ms`);
+    console.log(`   Instancia más rápida: ${tiempoMasRapido}ms`);
     
     // Calcular la mejora de rendimiento estimada
     const tiempoSerieEstimado = exitosos.reduce((sum, r) => sum + (r.duracion || 0), 0);
     const mejoraRendimiento = Math.round(((tiempoSerieEstimado - totalDuration) / tiempoSerieEstimado) * 100);
-    console.log(`   📈 Mejora estimada vs serie: ${mejoraRendimiento > 0 ? '+' : ''}${mejoraRendimiento}%`);
+    console.log(`   Mejora estimada vs serie: ${mejoraRendimiento > 0 ? '+' : ''}${mejoraRendimiento}%`);
   }
 
   // Verificar si hubo errores críticos
   if (fallidos.length > 0) {
     console.error(
-      `\n🚨 Se encontraron ${fallidos.length} errores durante la replicación`
+      `\nSe encontraron ${fallidos.length} errores durante la replicación`
     );
 
     // Si más del 50% falló, considerar como fallo crítico
     if (fallidos.length > results.length / 2) {
-      console.error("🔥 Fallo crítico: Más del 50% de las instancias fallaron");
+      console.error("Fallo crítico: Más del 50% de las instancias fallaron");
       process.exit(1);
     } else {
-      console.warn("⚠️ Replicación parcial: Algunas instancias fallaron");
+      console.warn("Replicación parcial: Algunas instancias fallaron");
       // No salir con error si es un fallo parcial
     }
   }
@@ -471,10 +550,10 @@ async function replicateToMongoDBInstances(): Promise<void> {
 // Ejecutar la función principal
 replicateToMongoDBInstances()
   .then(() => {
-    console.log("\n🎉 Replicación MongoDB PARALELA completada con éxito");
+    console.log("\nReplicación MongoDB PARALELA completada con éxito");
     process.exit(0);
   })
   .catch((error) => {
-    console.error("\n💥 Error fatal en replicación MongoDB PARALELA:", error);
+    console.error("\nError fatal en replicación MongoDB PARALELA:", error);
     process.exit(1);
   });
